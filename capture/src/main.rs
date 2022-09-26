@@ -7,7 +7,7 @@ use mqttbytes::v4::{Packet, SubscribeReasonCode};
 use pcap::{Capture, Device};
 use serde::Serialize;
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 struct HeadersInfo {
     packet_len: usize,
     ip_len: u16,
@@ -66,11 +66,14 @@ fn main() -> anyhow::Result<()> {
     let mut l20_diffs = VecDeque::with_capacity(20);
     l20_diffs.push_back(0);
 
+    let mut count = 1;
+
     loop {
+        println!("count : {count}");
         let mut info = HeadersInfo::default();
         info.packet_len = packet.data.len();
 
-        let parsed_packet = SlicedPacket::from_ip(&packet.data[16..])?;
+        let parsed_packet = SlicedPacket::from_ip(&packet.data[14..])?;
 
         match parsed_packet.ip {
             Some(InternetSlice::Ipv4(header, _)) => {
@@ -84,6 +87,9 @@ fn main() -> anyhow::Result<()> {
                     Err(pcap::Error::NoMorePackets) => break,
                     v => v?,
                 };
+
+                println!("disconn : not ipv4");
+                count += 1;
 
                 continue;
             }
@@ -130,11 +136,14 @@ fn main() -> anyhow::Result<()> {
                     v => v?,
                 };
 
+                println!("disconn : not tcp");
+                count += 1;
+
                 continue;
             }
         };
 
-        let mqtt_packet =
+        let mut mqtt_packet =
             match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
                 Ok(p) => p,
                 Err(_) => {
@@ -147,104 +156,121 @@ fn main() -> anyhow::Result<()> {
                 }
             };
 
-        match mqtt_packet {
-            Packet::Connect(conn) => {
-                info.mqtt_len = conn.len();
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 1;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::ConnAck(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 2;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::Publish(publish) => {
-                info.mqtt_len = publish.len();
-                info.mqtt_topic_len = publish.topic.len();
-                info.mqtt_msg_type = 3;
-                info.mqtt_qos_lvl = publish.qos as u8;
-            }
-            Packet::PubAck(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 4;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::PubRec(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 5;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::PubRel(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 6;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::PubComp(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 7;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::Subscribe(subscribe) => {
-                let mqtt_len = subscribe.len();
-                let filter = subscribe.filters.into_iter().next().unwrap();
-                info.mqtt_len = mqtt_len;
-                info.mqtt_topic_len = filter.path.len();
-                info.mqtt_msg_type = 8;
-                info.mqtt_qos_lvl = filter.qos as u8;
-            }
-            Packet::SubAck(ack) => {
-                let mqtt_len = 2 + ack.return_codes.len();
-                let filter = ack.return_codes.into_iter().next().unwrap();
-                let mqtt_qos_lvl = match filter {
-                    SubscribeReasonCode::Success(qos) => qos as u8,
-                    _ => 0,
-                };
-                info.mqtt_len = mqtt_len;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 9;
-                info.mqtt_qos_lvl = mqtt_qos_lvl;
-            }
-            Packet::Unsubscribe(ubsub) => {
-                let mqtt_len = 2 + ubsub.topics.iter().map(|s| s.len() + 2).sum::<usize>();
-                let filter = ubsub.topics.into_iter().next().unwrap();
-                info.mqtt_len = mqtt_len;
-                info.mqtt_topic_len = filter.len();
-                info.mqtt_msg_type = 10;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::UnsubAck(_) => {
-                info.mqtt_len = 2;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 11;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::PingReq => {
-                info.mqtt_len = 0;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 12;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::PingResp => {
-                info.mqtt_len = 0;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 13;
-                info.mqtt_qos_lvl = 0;
-            }
-            Packet::Disconnect => {
-                info.mqtt_len = 0;
-                info.mqtt_topic_len = 0;
-                info.mqtt_msg_type = 14;
-                info.mqtt_qos_lvl = 0;
-            }
-        };
+        loop {
+            let mut info = info.clone();
 
-        agent.get("localhost:8000").send_string(&serde_json::to_string(&info)?)?;
+            match mqtt_packet {
+                Packet::Connect(conn) => {
+                    info.mqtt_len = conn.len();
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 1;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::ConnAck(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 2;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::Publish(publish) => {
+                    info.mqtt_len = publish.len();
+                    info.mqtt_topic_len = publish.topic.len();
+                    info.mqtt_msg_type = 3;
+                    info.mqtt_qos_lvl = publish.qos as u8;
+                }
+                Packet::PubAck(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 4;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::PubRec(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 5;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::PubRel(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 6;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::PubComp(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 7;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::Subscribe(subscribe) => {
+                    let mqtt_len = subscribe.len();
+                    let filter = subscribe.filters.into_iter().next().unwrap();
+                    info.mqtt_len = mqtt_len;
+                    info.mqtt_topic_len = filter.path.len();
+                    info.mqtt_msg_type = 8;
+                    info.mqtt_qos_lvl = filter.qos as u8;
+                }
+                Packet::SubAck(ack) => {
+                    let mqtt_len = 2 + ack.return_codes.len();
+                    let filter = ack.return_codes.into_iter().next().unwrap();
+                    let mqtt_qos_lvl = match filter {
+                        SubscribeReasonCode::Success(qos) => qos as u8,
+                        _ => 0,
+                    };
+                    info.mqtt_len = mqtt_len;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 9;
+                    info.mqtt_qos_lvl = mqtt_qos_lvl;
+                }
+                Packet::Unsubscribe(ubsub) => {
+                    let mqtt_len = 2 + ubsub.topics.iter().map(|s| s.len() + 2).sum::<usize>();
+                    let filter = ubsub.topics.into_iter().next().unwrap();
+                    info.mqtt_len = mqtt_len;
+                    info.mqtt_topic_len = filter.len();
+                    info.mqtt_msg_type = 10;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::UnsubAck(_) => {
+                    info.mqtt_len = 2;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 11;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::PingReq => {
+                    info.mqtt_len = 0;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 12;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::PingResp => {
+                    info.mqtt_len = 0;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 13;
+                    info.mqtt_qos_lvl = 0;
+                }
+                Packet::Disconnect => {
+                    info.mqtt_len = 0;
+                    info.mqtt_topic_len = 0;
+                    info.mqtt_msg_type = 14;
+                    info.mqtt_qos_lvl = 0;
+                }
+            };
+
+            let response = agent
+                .post("http://localhost:8000")
+                .set("content-type", "application/json")
+                .send_string(&serde_json::to_string(&info)?)?;
+
+            println!("{}", response.into_string()?);
+
+            mqtt_packet =
+                match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        break;
+                    }
+                };
+        }
 
         packet = match capture.next_packet() {
             Ok(packet) => packet,
@@ -253,6 +279,7 @@ fn main() -> anyhow::Result<()> {
                 break;
             }
         };
+        count += 1;
     }
 
     Ok(())
