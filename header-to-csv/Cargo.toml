@@ -1,0 +1,15 @@
+[package]
+name = "header-to-csv"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.64"
+bytes = "1.2.1"
+csv = "1.1.6"
+etherparse = "0.12.0"
+mqttbytes = "0.6.0"
+pcap = "0.10.1"
+serde = { version = "1.0.144", features = ["derive"] }
