@@ -126,20 +126,20 @@ fn main() -> anyhow::Result<()> {
             }
         };
 
-        let mut mqtt_packet =
-            match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
-                Ok(p) => p,
-                Err(_) => {
-                    writer.serialize(info)?;
+        let buf = &mut BytesMut::from(parsed_packet.payload);
+        let mut mqtt_packet = match mqttbytes::v4::read(buf, 1 << 30) {
+            Ok(p) => p,
+            Err(_) => {
+                writer.serialize(info)?;
 
-                    packet = match capture.next_packet() {
-                        Err(pcap::Error::NoMorePackets) => break,
-                        v => v?,
-                    };
+                packet = match capture.next_packet() {
+                    Err(pcap::Error::NoMorePackets) => break,
+                    v => v?,
+                };
 
-                    continue;
-                }
-            };
+                continue;
+            }
+        };
 
         loop {
             let mut info = info.clone();
@@ -243,13 +243,12 @@ fn main() -> anyhow::Result<()> {
 
             writer.serialize(info)?;
 
-            mqtt_packet =
-                match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
-                    Ok(p) => p,
-                    Err(_) => {
-                        break;
-                    }
-                };
+            mqtt_packet = match mqttbytes::v4::read(buf, 1 << 30) {
+                Ok(p) => p,
+                Err(_) => {
+                    break;
+                }
+            };
         }
 
         packet = match capture.next_packet() {
