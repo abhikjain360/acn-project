@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let device = localhost_device.ok_or(anyhow!("no lookup device"))?;
-    let mut capture = Capture::from_device(device)?.timeout(1).open()?;
+    let mut capture = Capture::from_device(device)?.timeout(100).open()?;
 
     let agent = ureq::agent();
 
@@ -69,7 +69,6 @@ fn main() -> anyhow::Result<()> {
     let mut count = 1;
 
     loop {
-        println!("count : {count}");
         let mut info = HeadersInfo::default();
         info.packet_len = packet.data.len();
 
@@ -88,7 +87,7 @@ fn main() -> anyhow::Result<()> {
                     v => v?,
                 };
 
-                println!("disconn : not ipv4");
+                // println!("disconn : not ipv4");
                 count += 1;
 
                 continue;
@@ -136,25 +135,25 @@ fn main() -> anyhow::Result<()> {
                     v => v?,
                 };
 
-                println!("disconn : not tcp");
+                // println!("disconn : not tcp");
                 count += 1;
 
                 continue;
             }
         };
 
-        let mut mqtt_packet =
-            match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
-                Ok(p) => p,
-                Err(_) => {
-                    packet = match capture.next_packet() {
-                        Err(pcap::Error::NoMorePackets) => break,
-                        v => v?,
-                    };
+        let buf = &mut BytesMut::from(parsed_packet.payload);
+        let mut mqtt_packet = match mqttbytes::v4::read(buf, 1 << 30) {
+            Ok(p) => p,
+            Err(_) => {
+                packet = match capture.next_packet() {
+                    Err(pcap::Error::NoMorePackets) => break,
+                    v => v?,
+                };
 
-                    continue;
-                }
-            };
+                continue;
+            }
+        };
 
         loop {
             let mut info = info.clone();
@@ -261,15 +260,14 @@ fn main() -> anyhow::Result<()> {
                 .set("content-type", "application/json")
                 .send_string(&serde_json::to_string(&info)?)?;
 
-            println!("{}", response.into_string()?);
+            println!("count: {count}\n{}\n", response.into_string()?);
 
-            mqtt_packet =
-                match mqttbytes::v4::read(&mut BytesMut::from(parsed_packet.payload), 1 << 30) {
-                    Ok(p) => p,
-                    Err(_) => {
-                        break;
-                    }
-                };
+            mqtt_packet = match mqttbytes::v4::read(buf, 1 << 30) {
+                Ok(p) => p,
+                Err(_) => {
+                    break;
+                }
+            };
         }
 
         packet = match capture.next_packet() {
