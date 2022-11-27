@@ -62,7 +62,7 @@ fn main() -> anyhow::Result<()> {
         let mut info = HeadersInfo::default();
         info.packet_len = packet.data.len();
 
-        let parsed_packet = SlicedPacket::from_ip(&packet.data[16..])?;
+        let parsed_packet = SlicedPacket::from_ethernet(&packet.data[16..])?;
 
         match parsed_packet.ip {
             Some(InternetSlice::Ipv4(header, _)) => {
@@ -189,7 +189,10 @@ fn main() -> anyhow::Result<()> {
                 }
                 Packet::Subscribe(subscribe) => {
                     let mqtt_len = subscribe.len();
-                    let filter = subscribe.filters.into_iter().next().unwrap();
+                    let filter = match subscribe.filters.into_iter().next() {
+                        Some(v) => v,
+                        None => break,
+                    };
                     info.mqtt_len = mqtt_len;
                     info.mqtt_topic_len = filter.path.len();
                     info.mqtt_msg_type = 8;

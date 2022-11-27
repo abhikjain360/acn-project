@@ -35,6 +35,11 @@ struct HeadersInfo {
     mqtt_qos_lvl: u8,
 }
 
+#[allow(dead_code)]
+fn run() -> anyhow::Result<()> {
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
     let mut localhost_device = None;
     for device in Device::list()? {
@@ -51,11 +56,10 @@ fn main() -> anyhow::Result<()> {
 
     println!("starting capture");
 
-    let mut packet = match capture.next_packet() {
-        Ok(packet) => packet,
-        Err(e) => {
-            println!("{e}");
-            return Ok(());
+    let mut packet = loop {
+        match capture.next_packet() {
+            Err(pcap::Error::TimeoutExpired) => continue,
+            v => break v?,
         }
     };
 
@@ -68,7 +72,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut count = 1;
 
-    loop {
+    'outer: loop {
         let mut info = HeadersInfo::default();
         info.packet_len = packet.data.len();
 
@@ -81,17 +85,17 @@ fn main() -> anyhow::Result<()> {
                 info.ip_mf = header.more_fragments();
                 info.ip_ttl = header.ttl();
             }
-            _ => {
+            _ => loop {
                 packet = match capture.next_packet() {
-                    Err(pcap::Error::NoMorePackets) => break,
+                    Err(pcap::Error::TimeoutExpired) => continue,
                     v => v?,
                 };
 
                 // println!("disconn : not ipv4");
                 count += 1;
 
-                continue;
-            }
+                continue 'outer;
+            },
         };
 
         let ts2 = packet.header.ts;
@@ -129,30 +133,30 @@ fn main() -> anyhow::Result<()> {
                 info.tcp_tdelta = diff;
                 info.tcp_l20_avg = tcp_l20_avg;
             }
-            _ => {
+            _ => loop {
                 packet = match capture.next_packet() {
-                    Err(pcap::Error::NoMorePackets) => break,
+                    Err(pcap::Error::TimeoutExpired) => continue,
                     v => v?,
                 };
 
                 // println!("disconn : not tcp");
                 count += 1;
 
-                continue;
-            }
+                continue 'outer;
+            },
         };
 
         let buf = &mut BytesMut::from(parsed_packet.payload);
         let mut mqtt_packet = match mqttbytes::v4::read(buf, 1 << 30) {
             Ok(p) => p,
-            Err(_) => {
+            Err(_) => loop {
                 packet = match capture.next_packet() {
-                    Err(pcap::Error::NoMorePackets) => break,
+                    Err(pcap::Error::TimeoutExpired) => continue,
                     v => v?,
                 };
 
-                continue;
-            }
+                continue 'outer;
+            },
         };
 
         loop {
@@ -270,15 +274,12 @@ fn main() -> anyhow::Result<()> {
             };
         }
 
-        packet = match capture.next_packet() {
-            Ok(packet) => packet,
-            Err(e) => {
-                println!("{e}");
-                break;
-            }
+        packet = loop {
+            match capture.next_packet() {
+                Err(pcap::Error::TimeoutExpired) => continue,
+                v => break v?,
+            };
         };
         count += 1;
     }
-
-    Ok(())
 }
